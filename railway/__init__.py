@@ -1,4 +1,4 @@
-"""线路检测数据：按里程切块的并行可装配复测段查询数据集 + 落盘工单对账。"""
+"""线路检测数据：按里程分块的复测段查询数据集、落盘工单对账、出数回放。"""
 
 from .dataset import AssemblyError, Dataset, assemble, build_block
 from .changes import (
@@ -24,6 +24,16 @@ from .model import (
     State,
 )
 from .monoid import SoftComponent, Summary, merge, merge_all
+from .replay import (
+    BlockSpec,
+    CalibrationNotice,
+    Observation,
+    ReplayAccessStats,
+    ReplayError,
+    ReplayLedger,
+    Snapshot,
+    SourceSpan,
+)
 from .orders import (
     ACCEPT,
     REVOKE,
@@ -76,4 +86,12 @@ __all__ = [
     "REVOKE",
     "AccessStats",
     "BatchResult",
+    "BlockSpec",
+    "CalibrationNotice",
+    "Observation",
+    "ReplayAccessStats",
+    "ReplayError",
+    "ReplayLedger",
+    "Snapshot",
+    "SourceSpan",
 ]
