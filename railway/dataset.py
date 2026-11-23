@@ -338,14 +338,10 @@ class Dataset:
             k += 1
         band_len = hi - lo  # home 内连续游程（全 GAP）长度
 
-        sfx, pfx = home.summary.suffix, home.summary.prefix
-        reopened_r = sfx.reopened_right if sfx is not None else None
-        reopened_l = pfx.reopened_left if pfx is not None else None
-
-        # 向右跨块：
-        #  (a) 游程顶 home 右界：邻块边缘 GAP 连续，扩展带界并累加；
-        #  (b) reopened 覆盖当前 GAP 但游程不贴界：同一条带的另一段在邻块，
-        #      只累加邻块 GAP 长度，带界（hi）保持 home 游程右缘。
+        # 向右跨块：只有 home 内连续 GAP 游程顶到块右界（hi == home.end）
+        # 时，邻块左缘的 GAP 才可能是同一条带的延续。若游程不贴块界，说明
+        # 该 GAP 与接缝之间隔着 MISSING/OK——邻块边缘 GAP 是另一条独立带，
+        # 绝不能跨块累加（否则会把两条独立短带误算成一条超长带）。
         idx = home_idx
         if hi == home.end:
             while idx + 1 < len(self._blocks):
@@ -361,23 +357,11 @@ class Dataset:
                 band_len += c.gap_left
                 hi = edge_hi
                 idx += 1
-        elif (reopened_r is not None
-              and reopened_r.start <= mile < reopened_r.end):
-            nxt_idx = home_idx + 1
-            if nxt_idx < len(self._blocks):
-                c = self._blocks[nxt_idx].summary.prefix
-                if (c is not None and c.version == seg.version
-                        and c.gap_left > 0):
-                    band_len += c.gap_left
 
-        # 向左跨块（对称）：连续游程顶 home 左界，或 reopened_left 覆盖当前
-        # GAP 时连接左邻块边缘 GAP。
+        # 向左跨块（对称）：仅当 home 内连续游程顶到块左界时，才可能与左
+        # 邻块右缘的 GAP 是同一条带；不贴界则是独立带，不跨块累加。
         idx = home_idx
-        go_left = lo == home.start or (
-            reopened_l is not None
-            and reopened_l.start <= mile < reopened_l.end
-        )
-        if go_left:
+        if lo == home.start:
             while idx > 0:
                 prev = self._blocks[idx - 1]
                 c = prev.summary.suffix

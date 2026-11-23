@@ -277,11 +277,10 @@ def _reopen_edge_gaps(c: Optional[SoftComponent],
 
     # 右界重开有两种情形（都要求核内最后一条 GAP 被 MISSING 夹在核中）：
     #  (a) GAP 本身贴块右界（g.end == c.end）：接缝直接切带，核截断、GAP
-    #      移出核并暴露为边缘 GAP；
+    #      移出核并暴露为边缘 GAP，参与接缝处整条带长的配对判定；
     #  (b) GAP 后还有同核 MISSING 延伸到块右界（g.end < c.end）：接缝切在
-    #      MISSING 中。仍记录 gap_right/reopened，使对侧块边缘也是 GAP 时
-    #      能按“同一条被切开的缺报带”配对（_junction_gap 要求两侧都探测到
-    #      GAP 才相加；对侧是 MISSING 时探针为 0，不会误拼）。
+    #      MISSING 中。该 GAP 与右邻块边缘 GAP 隔着 MISSING，是两条独立带，
+    #      不参与接缝配对；这里仅保留重开探针，供根化 finalize 恢复完整核。
     if (
         c.end == block_end
         and gap_right == 0
@@ -290,13 +289,19 @@ def _reopen_edge_gaps(c: Optional[SoftComponent],
         and core.end == c.end
     ):
         g = core.gaps[-1]
-        reopened_right = g
-        gap_right = g.end - g.start
-        if g.end == c.end:
+        if g.end == block_end:
+            # case a：GAP 本身贴块右界，接缝直接切带——移出核并暴露为
+            # 边缘 GAP，交由接缝配对判定整条带长。
+            reopened_right = g
+            gap_right = g.end - g.start
             kept = core.gaps[:-1]
             kept_missing = (g.start - core.start) - sum(
                 iv.end - iv.start for iv in kept)
             core = Core(core.start, g.start, kept_missing, kept)
+        else:
+            # case b：GAP 后还有 MISSING 延伸到块右界。仅设置重开探针
+            # （核保持完整），根化时按完整核出段；不参与接缝 GAP 配对。
+            reopened_right = g
 
     # 左界重开（对称）。
     if (
@@ -307,13 +312,17 @@ def _reopen_edge_gaps(c: Optional[SoftComponent],
         and core.start == c.start
     ):
         g = core.gaps[0]
-        reopened_left = g
-        gap_left = g.end - g.start
-        if g.start == c.start:
+        if g.start == block_start:
+            # case a：GAP 本身贴块左界，移出核暴露为边缘 GAP。
+            reopened_left = g
+            gap_left = g.end - g.start
             kept = core.gaps[1:]
             kept_missing = (core.end - g.end) - sum(
                 iv.end - iv.start for iv in kept)
             core = Core(g.end, core.end, kept_missing, kept)
+        else:
+            # case b：GAP 前的 MISSING 贴块左界，只设探针，核保持完整。
+            reopened_left = g
 
     return replace(c, core=core, gap_left=gap_left, gap_right=gap_right,
                    reopened_right=reopened_right,
@@ -326,9 +335,9 @@ def _reopen_edge_gaps(c: Optional[SoftComponent],
 def _junction_gap(ca: SoftComponent, cb: SoftComponent, seam: int) -> int:
     """接缝处被切开的连续 GAP 带全长；不是 GAP 接缝时返回 0。
 
-    叶子重开保证：被块界切开的 GAP 一定在组件边缘 GAP（``gap_right`` /
-    ``gap_left``）上，或表现为核内一条端到接缝的 GAP。两侧都探测到 GAP
-    才属于同一条带，长度相加。
+    只有真正贴接缝的边缘 GAP（``gap_right`` / ``gap_left``）才可能属于
+    同一条被块界切开的带：两侧都探测到 GAP 才配对，长度相加。核内、与接缝
+    隔着 MISSING 的 GAP 是独立缺报带，不参与跨块拼接。
     """
     rlen = _right_edge_gap(ca, seam)
     llen = _left_edge_gap(cb, seam)
@@ -338,25 +347,13 @@ def _junction_gap(ca: SoftComponent, cb: SoftComponent, seam: int) -> int:
 
 
 def _right_edge_gap(c: SoftComponent, seam: int) -> int:
-    """组件右端与接缝相邻的 GAP 长度（边缘 GAP 或核内贴接缝的 GAP）。"""
-    if c.gap_right:
-        return c.gap_right
-    if c.core is not None and c.core.gaps:
-        last = c.core.gaps[-1]
-        if last.state is State.GAP and last.end == seam:
-            return seam - last.start
-    return 0
+    """组件右端贴接缝的边缘 GAP 长度；无边缘 GAP 返回 0。"""
+    return c.gap_right
 
 
 def _left_edge_gap(c: SoftComponent, seam: int) -> int:
-    """组件左端与接缝相邻的 GAP 长度（对称）。"""
-    if c.gap_left:
-        return c.gap_left
-    if c.core is not None and c.core.gaps:
-        first = c.core.gaps[0]
-        if first.state is State.GAP and first.start == seam:
-            return first.end - seam
-    return 0
+    """组件左端贴接缝的边缘 GAP 长度；无边缘 GAP 返回 0。"""
+    return c.gap_left
 
 
 def merge(a: Summary, b: Summary) -> Summary:
@@ -615,7 +612,8 @@ def _split_right(a: Summary, ca: SoftComponent, seam: int):
         and ca.core.gaps[-1].end == seam
     )
     if not inside_gap:
-        new_prefix, extra = _seal_right(a, ca, mark=True, closed=closed)
+        # 防御性兜底：正常流程中长带切口只发生在贴接缝 GAP（inside_gap 成立）。
+        new_prefix, extra = _seal_right(a, ca, mark=True)
         return new_prefix, extra, None
 
     gap_iv = ca.core.gaps[-1]
@@ -684,7 +682,8 @@ def _split_left(b: Summary, cb: SoftComponent, seam: int):
         and cb.core.gaps[0].start == seam
     )
     if not inside_gap:
-        new_suffix, extra = _seal_left(b, cb, mark=True, closed=closed)
+        # 防御性兜底：正常流程中长带切口只发生在贴接缝 GAP（inside_gap 成立）。
+        new_suffix, extra = _seal_left(b, cb, mark=True)
         return new_suffix, extra, None
 
     gap_iv = cb.core.gaps[0]

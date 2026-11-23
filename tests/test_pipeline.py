@@ -170,24 +170,39 @@ class DifferentialTests(unittest.TestCase):
 
     def test_gap_band_split_across_blocks(self):
         rules = {1: Rule(1, max_gap=3, min_missing=2)}
-        # GAP 带总长 4（2+2），超阈值 -> 硬切口，两侧各自成段
-        b1 = build_block("B1", 0, 5, [
+        # 物理连续的同一条 GAP 带被接缝切成 2+2，总长 4 超阈值 -> 硬切口，
+        # 两侧各自成段。注意：隔着 MISSING 的两条 GAP 是独立带（各自判长），
+        # 不做跨块相加——这由随机差分测试与 reference 逐格语义守护。
+        b1 = build_block("B1", 0, 4, [
+            Interval(0, 2, State.MISSING), Interval(2, 4, State.GAP),
+        ], rules[1])
+        b2 = build_block("B2", 4, 9, [
+            Interval(4, 6, State.GAP), Interval(6, 9, State.MISSING),
+        ], rules[1])
+        ds = assemble([b2, b1], 0, 9, rules)  # 故意乱序
+        segs = ds.segments
+        self.assertEqual([(s.start, s.end) for s in segs], [(0, 2), (6, 9)])
+
+        # 隔着 MISSING 的两条独立短 GAP（各长 2，均 <=3）：都可跨过，
+        # 段不因跨块而被错误切断（回归：核内 GAP 探针不得误配独立带）。
+        i1 = build_block("I1", 0, 5, [
             Interval(0, 2, State.MISSING), Interval(2, 4, State.GAP),
             Interval(4, 5, State.MISSING),
         ], rules[1])
-        b2 = build_block("B2", 5, 10, [
+        i2 = build_block("I2", 5, 10, [
             Interval(5, 7, State.GAP), Interval(7, 10, State.MISSING),
         ], rules[1])
-        ds = assemble([b2, b1], 0, 10, rules)  # 故意乱序
-        segs = ds.segments
-        self.assertEqual([(s.start, s.end) for s in segs], [(0, 2), (7, 10)])
+        ds_indep = assemble([i2, i1], 0, 10, rules)
+        self.assertEqual(
+            [(s.start, s.end) for s in ds_indep.segments], [(0, 10)]
+        )
 
         # 同一条带切成 2+1，总长 3，恰好不超阈值 -> 合并成一段
-        b2b = build_block("B2", 5, 9, [
-            Interval(5, 6, State.GAP), Interval(6, 9, State.MISSING),
+        b2b = build_block("B2", 4, 8, [
+            Interval(4, 5, State.GAP), Interval(5, 8, State.MISSING),
         ], rules[1])
-        ds2 = assemble([b1, b2b], 0, 9, rules)
-        self.assertEqual([(s.start, s.end) for s in ds2.segments], [(0, 9)])
+        ds2 = assemble([b1, b2b], 0, 8, rules)
+        self.assertEqual([(s.start, s.end) for s in ds2.segments], [(0, 8)])
         hits = ds2.query_window(2, 6)  # 只覆盖 GAP 带，也要返回该段
         self.assertEqual(len(hits), 1)
         gap_ev = [e for e in hits[0].evidence if e.state is State.GAP]
