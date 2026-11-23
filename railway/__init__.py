@@ -1,6 +1,18 @@
 """线路检测数据：按里程切块的并行可装配复测段查询数据集 + 落盘工单对账。"""
 
 from .dataset import AssemblyError, Dataset, assemble, build_block
+from .changes import (
+    ChangeAccessStats,
+    ChangeCategory,
+    ChangeList,
+    ChangeRow,
+    ChainError,
+    Direction,
+    DueEvidence,
+    HandoverRecord,
+    LineVersion,
+    VersionChain,
+)
 from .model import (
     BlockArtifact,
     Core,
@@ -31,6 +43,16 @@ __all__ = [
     "Dataset",
     "assemble",
     "build_block",
+    "ChangeAccessStats",
+    "ChangeCategory",
+    "ChangeList",
+    "ChangeRow",
+    "ChainError",
+    "Direction",
+    "DueEvidence",
+    "HandoverRecord",
+    "LineVersion",
+    "VersionChain",
     "BlockArtifact",
     "Core",
     "CrewEvidence",
